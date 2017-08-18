@@ -123,7 +123,7 @@ public class HelloWorldHandler extends TextWebSocketHandler {
 	      user.setWebRtcEndpoint(webRtcEndpoint);
 	      users.put(session.getId(), user);
 	      
-	      // 3. SDP negotiation
+	      // 3. SDP negotiation 
 	      String sdpOffer = jsonMessage.get("sdpOffer").getAsString();
 	      String sdpAnswer = webRtcEndpoint.processOffer(sdpOffer);
 
