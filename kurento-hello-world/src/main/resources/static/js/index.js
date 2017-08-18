@@ -18,7 +18,12 @@
 var ws = new WebSocket('wss://' + location.host + '/helloworld');
 var videoInput;
 var videoOutput;
+
+var testVideo;
+
 var webRtcPeer;
+var webRtcPeerTest;
+
 var state = null;
 
 const I_CAN_START = 0;
@@ -30,6 +35,8 @@ window.onload = function() {
 	console.log('Page loaded ...');
 	videoInput = document.getElementById('videoInput');
 	videoOutput = document.getElementById('videoOutput');
+	
+	testVideo = document.getElementById('testVideo');
 	setState(I_CAN_START);
 }
 
@@ -37,6 +44,7 @@ window.onbeforeunload = function() {
 	ws.close();
 }
 
+//调用id返回结果
 ws.onmessage = function(message) {
 	var parsedMessage = JSON.parse(message.data);
 	console.info('Received message: ' + message.data);
@@ -45,18 +53,31 @@ ws.onmessage = function(message) {
 	case 'startResponse':
 		startResponse(parsedMessage);
 		break;
+	case 'startResponseTest':
+		startTestResponse(parsedMessage);
+		break;
 	case 'error':
 		if (state == I_AM_STARTING) {
 			setState(I_CAN_START);
 		}
 		onError('Error message from server: ' + parsedMessage.message);
 		break;
-	case 'iceCandidate':
-		webRtcPeer.addIceCandidate(parsedMessage.candidate, function(error) {
-			if (error)
-				return console.error('Error adding candidate: ' + error);
-		});
-		break;
+//	case 'iceCandidate':
+//		if(webRtcPeer) {
+//			webRtcPeer.addIceCandidate(parsedMessage.candidate, function(error) {
+//				if (error)
+//					return console.error('Error adding candidate: ' + error);
+//			});
+//		}
+//		break;
+//	case 'iceCandidateTest':
+//		if(webRtcPeerTest) {
+//			webRtcPeerTest.addIceCandidate(parsedMessage.candidate, function(error) {
+//				if (error)
+//					return console.error('Error adding candidate: ' + error);
+//			});
+//		}
+//		break;
 	default:
 		if (state == I_AM_STARTING) {
 			setState(I_CAN_START);
@@ -71,7 +92,6 @@ function start() {
 	// Disable start button
 	setState(I_AM_STARTING);
 	showSpinner(videoInput, videoOutput);
-
 	console.log('Creating WebRtcPeer and generating local sdp offer ...');
 
 	var options = {
@@ -87,6 +107,26 @@ function start() {
 			});
 }
 
+function startTest() {
+	console.log('Starting test video call ...');
+	console.log('Creating WebRtcPeer and generating test sdp offer ...');
+	
+	showSpinner(testVideo);
+	var options = {
+			//localVideo : testVideo,
+			remoteVideo : testVideo,
+			onicecandidate : onIceCandidate
+	}
+	
+	webRtcPeerTest =new kurentoUtils.WebRtcPeer.WebRtcPeerRecvonly(options,
+			function(error) {
+		if(error) {
+			return console.error(error);
+		}
+		webRtcPeerTest.generateOffer(onOfferTest);
+	});
+}
+
 function onOffer(error, offerSdp) {
 	if (error)
 		return console.error('Error generating the offer');
@@ -98,10 +138,22 @@ function onOffer(error, offerSdp) {
 	sendMessage(message);
 }
 
+function onOfferTest(error, offerSdp) {
+	if (error)
+		return console.error('Error generating the offer');
+	console.info('Invoking SDP offer callback function ' + location.host);
+	var message = {
+		id : 'startTest',
+		sdpOffer : offerSdp
+	}
+	sendMessage(message);
+}
+
 function onError(error) {
 	console.error(error);
 }
 
+//调用iceCandidate方法
 function onIceCandidate(candidate) {
 	console.log('Local candidate' + JSON.stringify(candidate));
 
@@ -112,29 +164,69 @@ function onIceCandidate(candidate) {
 	sendMessage(message);
 }
 
+//function onIceCandidateTest(candidate) {
+//	console.log('Remote candidate' + JSON.stringify(candidate));
+//
+//	var message = {
+//		id : 'onIceCandidateTest',
+//		candidate : candidate
+//	};
+//	sendMessage(message);
+//}
+
 function startResponse(message) {
 	setState(I_CAN_STOP);
 	console.log('SDP answer received from server. Processing ...');
+	if(webRtcPeer) {
+		webRtcPeer.processAnswer(message.sdpAnswer, function(error) {
+			if (error)
+				return console.error(error);
+		});
+	}
+}
 
-	webRtcPeer.processAnswer(message.sdpAnswer, function(error) {
-		if (error)
-			return console.error(error);
-	});
+function startTestResponse(message) {
+	if(webRtcPeerTest) {
+		webRtcPeerTest.processAnswer(message.sdpAnswer, function(error) {
+			if (error)
+				return console.error(error);
+		});
+	}
 }
 
 function stop() {
 	console.log('Stopping video call ...');
 	setState(I_CAN_START);
-	if (webRtcPeer) {
-		webRtcPeer.dispose();
-		webRtcPeer = null;
-
+	
+	if(webRtcPeer || webRtcPeerTest) {
+		if (webRtcPeer) {
+			webRtcPeer.dispose();
+			webRtcPeer = null;
+		}
+		if (webRtcPeerTest) {
+			webRtcPeerTest.dispose();
+			webRtcPeerTest = null;
+		}
 		var message = {
 			id : 'stop'
 		}
 		sendMessage(message);
 	}
-	hideSpinner(videoInput, videoOutput);
+	
+	hideSpinner(videoInput, videoOutput, testVideo);
+}
+
+function leave() {
+	if (webRtcPeerTest) {
+		webRtcPeerTest.dispose();
+		webRtcPeerTest = null;
+	}
+	var message = {
+		id : 'leave'
+	}
+	sendMessage(message);
+	
+	//hideSpinner(testVideo);
 }
 
 function setState(nextState) {
@@ -142,6 +234,7 @@ function setState(nextState) {
 	case I_CAN_START:
 		$('#start').attr('disabled', false);
 		$('#start').attr('onclick', 'start()');
+		$('#recv').attr('onclick', 'startTest()');
 		$('#stop').attr('disabled', true);
 		$('#stop').removeAttr('onclick');
 		break;
@@ -150,6 +243,7 @@ function setState(nextState) {
 		$('#start').attr('disabled', true);
 		$('#stop').attr('disabled', false);
 		$('#stop').attr('onclick', 'stop()');
+		//$('#leave').attr('onclick', 'leave()');
 		break;
 
 	case I_AM_STARTING:

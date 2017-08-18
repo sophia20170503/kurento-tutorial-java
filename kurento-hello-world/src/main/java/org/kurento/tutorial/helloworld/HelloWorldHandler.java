@@ -49,7 +49,8 @@ public class HelloWorldHandler extends TextWebSocketHandler {
 
   private static final Gson gson = new GsonBuilder().create();
   private final Logger log = LoggerFactory.getLogger(HelloWorldHandler.class);
-
+  MediaPipeline pipeline;
+  static WebRtcEndpoint webRtcEndpointLocal;
   @Autowired
   private KurentoClient kurento;
 
@@ -65,6 +66,12 @@ public class HelloWorldHandler extends TextWebSocketHandler {
       case "start":
         start(session, jsonMessage);
         break;
+      case "startTest":
+    	  startTest(session, jsonMessage);
+          break;
+      case "leave":
+    	  leave(session);
+    	  break;
       case "stop": {
         UserSession user = users.remove(session.getId());
         if (user != null) {
@@ -84,29 +91,94 @@ public class HelloWorldHandler extends TextWebSocketHandler {
         }
         break;
       }
+//      case "onIceCandidateTest": {
+//          JsonObject jsonCandidate = jsonMessage.get("candidate").getAsJsonObject();
+//
+//          UserSession user = users.get(session.getId());
+//          if (user != null) {
+//            IceCandidate candidate = new IceCandidate(jsonCandidate.get("candidate").getAsString(),
+//                jsonCandidate.get("sdpMid").getAsString(),
+//                jsonCandidate.get("sdpMLineIndex").getAsInt());
+//            user.addCandidate(candidate);
+//          }
+//          break;
+//        }
       default:
         sendError(session, "Invalid message with id " + jsonMessage.get("id").getAsString());
         break;
     }
   }
+  
+  private void startTest(final WebSocketSession session, JsonObject jsonMessage) {
+	  try {
+		  System.err.println(session.getId()+"进入直播间！");
+	      // 1. Media logic (webRtcEndpoint in loopback)
+//	      MediaPipeline pipeline = kurento.createMediaPipeline();
+	      WebRtcEndpoint webRtcEndpoint = new WebRtcEndpoint.Builder(pipeline).build();
+	      webRtcEndpointLocal.connect(webRtcEndpoint);
+
+	      // 2. Store user session
+	      UserSession user = new UserSession();
+	      user.setMediaPipeline(pipeline);
+	      user.setWebRtcEndpoint(webRtcEndpoint);
+	      users.put(session.getId(), user);
+	      
+	      // 3. SDP negotiation
+	      String sdpOffer = jsonMessage.get("sdpOffer").getAsString();
+	      String sdpAnswer = webRtcEndpoint.processOffer(sdpOffer);
+
+	      JsonObject response = new JsonObject();
+	      response.addProperty("id", "startResponseTest");
+	      response.addProperty("sdpAnswer", sdpAnswer);
+
+	      synchronized (session) {
+	        session.sendMessage(new TextMessage(response.toString()));
+	      }
+
+	      // 4. Gather ICE candidates
+//	      webRtcEndpoint.addIceCandidateFoundListener(new EventListener<IceCandidateFoundEvent>() {
+//
+//	        @Override
+//	        public void onEvent(IceCandidateFoundEvent event) {
+//	          JsonObject response = new JsonObject();
+//	          response.addProperty("id", "iceCandidateTest");
+//	          response.add("candidate", JsonUtils.toJsonObject(event.getCandidate()));
+//	          try {
+//	            synchronized (session) {
+//	              session.sendMessage(new TextMessage(response.toString()));
+//	            }
+//	          } catch (IOException e) {
+//	            log.error(e.getMessage());
+//	          }
+//	          
+//	        }
+//	      });
+
+	      webRtcEndpoint.gatherCandidates();
+
+	    } catch (Throwable t) {
+	      sendError(session, t.getMessage());
+	    }
+  }
 
   private void start(final WebSocketSession session, JsonObject jsonMessage) {
     try {
+    	System.err.println(session.getId()+"开始直播！");
       // 1. Media logic (webRtcEndpoint in loopback)
-      MediaPipeline pipeline = kurento.createMediaPipeline();
-      WebRtcEndpoint webRtcEndpoint = new WebRtcEndpoint.Builder(pipeline).build();
-      webRtcEndpoint.connect(webRtcEndpoint);
+      pipeline = kurento.createMediaPipeline();
+      webRtcEndpointLocal = new WebRtcEndpoint.Builder(pipeline).build();
+      webRtcEndpointLocal.connect(webRtcEndpointLocal);
 
       // 2. Store user session
       UserSession user = new UserSession();
       user.setMediaPipeline(pipeline);
-      user.setWebRtcEndpoint(webRtcEndpoint);
+      user.setWebRtcEndpoint(webRtcEndpointLocal);
       users.put(session.getId(), user);
 
       // 3. SDP negotiation
       String sdpOffer = jsonMessage.get("sdpOffer").getAsString();
-      String sdpAnswer = webRtcEndpoint.processOffer(sdpOffer);
-
+      String sdpAnswer = webRtcEndpointLocal.processOffer(sdpOffer);
+      
       JsonObject response = new JsonObject();
       response.addProperty("id", "startResponse");
       response.addProperty("sdpAnswer", sdpAnswer);
@@ -114,30 +186,39 @@ public class HelloWorldHandler extends TextWebSocketHandler {
       synchronized (session) {
         session.sendMessage(new TextMessage(response.toString()));
       }
-
+      
       // 4. Gather ICE candidates
-      webRtcEndpoint.addIceCandidateFoundListener(new EventListener<IceCandidateFoundEvent>() {
+//      webRtcEndpointLocal.addIceCandidateFoundListener(new EventListener<IceCandidateFoundEvent>() {
+//
+//        @Override
+//        public void onEvent(IceCandidateFoundEvent event) {
+//          JsonObject response = new JsonObject();
+//          response.addProperty("id", "iceCandidate");
+//          response.add("candidate", JsonUtils.toJsonObject(event.getCandidate()));
+//          try {
+//            synchronized (session) {
+//              session.sendMessage(new TextMessage(response.toString()));
+//            }
+//          } catch (IOException e) {
+//            log.error(e.getMessage());
+//          }
+//        }
+//      });
 
-        @Override
-        public void onEvent(IceCandidateFoundEvent event) {
-          JsonObject response = new JsonObject();
-          response.addProperty("id", "iceCandidate");
-          response.add("candidate", JsonUtils.toJsonObject(event.getCandidate()));
-          try {
-            synchronized (session) {
-              session.sendMessage(new TextMessage(response.toString()));
-            }
-          } catch (IOException e) {
-            log.error(e.getMessage());
-          }
-        }
-      });
-
-      webRtcEndpoint.gatherCandidates();
+      webRtcEndpointLocal.gatherCandidates();
 
     } catch (Throwable t) {
       sendError(session, t.getMessage());
     }
+  }
+  
+  private void leave(WebSocketSession session) {
+	  //UserSession user =users.remove(session.getId());
+	  UserSession user =users.get(session.getId());
+	  if(user !=null) {
+		  webRtcEndpointLocal.disconnect(user.getWebRtcEndpoint());
+		  //user.release();
+	  }
   }
 
   private void sendError(WebSocketSession session, String message) {
